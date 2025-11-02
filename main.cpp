@@ -369,22 +369,29 @@ int main(int argc, char* argv[])
       ImGui::NewFrame();
 
       ImGui::Begin("1553 Data");
+
+      ImGui::BeginChild("Time", ImVec2(0, 80), ImGuiChildFlags_Borders);
+
       ImGui::Text("End Time: %fs", end_time);
-      ImGui::SliderFloat("Current Time", &curr_time, 0.0, end_time, "%.3f");
+      ImGui::SliderFloat("Current Time", &curr_time, 0.0, end_time, "%.6f");
       if (ImGui::Button("Back"))
       {
-         curr_time -= 0.01f;
+         curr_time -= 0.1f;
          if (curr_time < 0.0f)
             curr_time = 0.0f;
       }
       ImGui::SameLine();
       if (ImGui::Button("Forward"))
       {
-         curr_time += 0.01f;
+         curr_time += 0.1f;
          if (curr_time > end_time)
             curr_time = end_time;
       }
+
+      ImGui::EndChild();
       
+      ImGui::BeginChild("1553", ImVec2(0, 0), ImGuiChildFlags_Borders);
+
       for (int i = 0; i < 32; i++)
       {
          std::string subaddress_label = "SA ";
@@ -401,23 +408,200 @@ int main(int argc, char* argv[])
                if (ImGui::TreeNode(label.c_str()))
                {
                   // Get current index
-                  size_t idx = 0;
+                  int idx = 0;
                   for (const auto& record : records[i][j])
                   {
+                     if (record.Time == curr_time)
+                        break;
+
                      if (record.Time > curr_time)
                      {
-                        if (idx > 0)
-                           idx -= 1;
+                        idx -= 1;
                         break;
                      }
+
                      idx++;
                   }
-                  ImGui::Text("Index: %ld", idx);
+
+                  if (ImGui::Button("Prev"))
+                  {
+                     if (idx > 0)
+                     {
+                        idx--;
+                        curr_time = records[i][j][idx].Time;
+                     }
+                  }
+                  ImGui::SameLine();
+                  if (ImGui::Button("Next"))
+                  {
+                     if (idx < (int)records[i][j].size() - 1)
+                     {
+                        idx++;
+                        curr_time = records[i][j][idx].Time;
+                     }
+                  }
+
+                  if (ImGui::Button("Prev Diff"))
+                  {
+                     if (idx > 0)
+                     {
+                        int start_idx = idx;
+
+                        if (start_idx >= records[i][j].size())
+                           start_idx = records[i][j].size() - 1;
+
+                        for (int k = start_idx; k >= 0; k--)
+                        {
+                           bool diff = false;
+                           const auto& curr_rec = records[i][j][start_idx];
+                           const auto& new_rec = records[i][j][k];
+
+                           diff = memcmp(&curr_rec.Data.CommandWord,
+                                         &new_rec.Data.CommandWord,
+                                         sizeof(curr_rec.Data.CommandWord)) != 0;
+
+                           if (!diff)
+                           {
+                              diff = curr_rec.Data.StatusWord != new_rec.Data.StatusWord;
+                           }
+
+                           if (!diff)
+                           {
+                              for (int x = 0; x < 32; x++)
+                              {
+                                 if (curr_rec.Data.Words[x] != new_rec.Data.Words[x])
+                                 {
+                                    diff = true;
+                                    break;
+                                 }
+                              }
+                           }
+
+                           if (diff)
+                           {
+                              idx = k;
+                              curr_time = records[i][j][idx].Time;
+                              break;
+                           }
+                        }
+                     }
+                  }
+                  ImGui::SameLine();
+                  if (ImGui::Button("Next Diff"))
+                  {
+                     if (idx < (int)records[i][j].size() - 1)
+                     {
+                        int start_idx = idx;
+
+                        if (start_idx == -1)
+                           start_idx = 0;
+
+                        for (int k = start_idx; k < records[i][j].size(); k++)
+                        {
+                           bool diff = false;
+                           const auto& curr_rec = records[i][j][start_idx];
+                           const auto& new_rec = records[i][j][k];
+
+                           diff = memcmp(&curr_rec.Data.CommandWord,
+                                         &new_rec.Data.CommandWord,
+                                         sizeof(curr_rec.Data.CommandWord)) != 0;
+
+                           if (!diff)
+                           {
+                              diff = curr_rec.Data.StatusWord != new_rec.Data.StatusWord;
+                           }
+
+                           if (!diff)
+                           {
+                              for (int x = 0; x < 32; x++)
+                              {
+                                 if (curr_rec.Data.Words[x] != new_rec.Data.Words[x])
+                                 {
+                                    diff = true;
+                                    break;
+                                 }
+                              }
+                           }
+
+                           if (diff)
+                           {
+                              idx = k;
+                              curr_time = records[i][j][idx].Time;
+                              break;
+                           }
+                        }
+                     }
+                  }
+
+                  if (idx >= 0 && idx < records[i][j].size())
+                  {
+                     ImGui::Text("Index: %d", idx);
+                     if (records[i][j].size())
+                     {
+                        const auto& r = records[i][j][idx];
+                        int num_words = r.Data.CommandWord.WordCount;
+                        if (num_words == 0)
+                           num_words = 32;
+                        ImGui::Text("Record:  %d", r.Record);
+                        ImGui::Text("Time:    %f", r.Time);
+                        ImGui::Text("Channel: %d", r.Channel);
+                        ImGui::Text("Bus:     %d", r.Bus);
+
+                        bool diff = false;
+                        if (idx > 0)
+                        {
+                           diff = memcmp(&r.Data.CommandWord,
+                                         &records[i][j][idx-1].Data.CommandWord,
+                                         sizeof(r.Data.CommandWord)) != 0;
+                        }
+
+                        if (diff)
+                           ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+                        ImGui::Text("Cmd:     0x%04x (%d, %c, %d, %d)",
+                                    r.Data.CommandWord,
+                                    r.Data.CommandWord.RemoteTerminal,
+                                    r.Data.CommandWord.Transmit ? 'T' : 'R',
+                                    r.Data.CommandWord.Subaddress,
+                                    r.Data.CommandWord.WordCount);
+                        if (diff)
+                           ImGui::PopStyleColor();
+
+                        diff = false;
+                        if (idx > 0)
+                           diff = r.Data.StatusWord != records[i][j][idx-1].Data.StatusWord;
+
+                        if (diff)
+                           ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+                        ImGui::Text("Status:  0x%04x", r.Data.StatusWord);
+                        if (diff)
+                           ImGui::PopStyleColor();
+
+                        ImGui::Text("Data Words:");
+                        for (int k = 0; k < num_words; k++)
+                        {
+                           diff = false;
+                           if (idx > 0)
+                              diff = r.Data.Words[k] != records[i][j][idx-1].Data.Words[k];
+
+                           if (diff)
+                              ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+                           ImGui::Text("0x%04x  ", r.Data.Words[k]);
+                           if (diff)
+                              ImGui::PopStyleColor();
+
+                           if (k < num_words - 1 && ((k + 1) % 8 != 0))
+                              ImGui::SameLine();
+                        }
+                     }
+                  }
+
                   ImGui::TreePop();
                }
             }
          }
       }
+
+      ImGui::EndChild();
 
       ImGui::End();
 
